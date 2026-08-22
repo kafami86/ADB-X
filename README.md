@@ -1,971 +1,351 @@
-# ⚡ ADB-X
+# Android ADB Backup
 
-### The Android ADB Specialist
+A reliable, incremental Android → PC backup tool that runs over official
+ADB. Unlike a simple `adb pull -a`, it never blindly re-copies everything:
+every run scans both sides, figures out exactly what's new, changed,
+missing, or left over from an interrupted transfer, and only moves those
+files. It works for **any** folder on the device, not just photos/videos.
 
-**ADB-X** is a professional Android-to-PC backup system built around **Android Debug Bridge (ADB)**.
+Backup is strictly one-way (Android → PC). Nothing on the phone is ever
+modified or deleted, and root is never required.
 
-It is designed for reliable **incremental backups**, intelligent file detection, multiple verification modes, automated jobs, resilient ADB transfers, and a polished terminal interface.
+## Verification modes
 
-> **Master the connection. Control the data.**
+Every backup job runs in one of three selectable verification modes,
+which change how the *decision algorithm itself* works, not just the UI:
 
----
+- **⚡️ FAST** (default) — path + size + modification time only. Never
+  hashes, never reads file contents. The right choice for daily backups
+  of large folders (10k+ files).
+- **⚖️ NORMAL** — same cheap metadata check first; escalates to a real
+  SHA-256 comparison only for the specific file whose metadata looks
+  ambiguous, and can use an optional local hash index to recognize an
+  obvious rename/move without hashing everything.
+- **🔬 STRICT / DEEP** — content identity via streamed SHA-256 is the
+  only thing that decides "already backed up". Filename and path never
+  determine identity, so this mode can detect files that were renamed,
+  moved, or placed in a different backup subfolder — as long as the
+  content is identical. Large files are always hashed in chunks
+  (`hash_chunk_size` in `config.json`, default 4 MB) and never loaded
+  into RAM.
 
-## ✨ Features
-
-### 📦 Incremental Backup
-
-ADB-X does not blindly copy everything every time.
-
-It compares the Android device against the existing PC backup and determines which files actually need to be transferred.
-
-Typical states include:
-
-* 🆕 New files
-* ✅ Already backed up
-* 🔄 Changed files
-* ❌ Failed transfers
-
-This makes repeated backups significantly more efficient than performing a full copy every time.
-
----
-
-### 🧠 Multiple Verification Modes
-
-ADB-X supports three verification modes:
-
-| Mode     | Description                                                   |
-| -------- | ------------------------------------------------------------- |
-| `fast`   | Fast path/size/metadata-based verification                    |
-| `normal` | Metadata-first verification with deeper checks when necessary |
-| `strict` | Strict SHA-256 content identity verification                  |
-
-#### FAST
-
-Designed for frequent backups where speed is important.
-
-```text
---mode fast
-```
-
-Uses lightweight file information to avoid unnecessary deep verification.
-
-#### NORMAL
-
-Balances performance and verification depth.
-
-```text
---mode normal
-```
-
-Metadata is checked first and deeper verification is performed when required.
-
-#### STRICT
-
-Designed for maximum content identity verification.
-
-```text
---mode strict
-```
-
-Uses SHA-256 content identity to determine whether files are truly identical.
-
----
-
-## 🔐 File Identity
-
-ADB-X is designed to avoid relying exclusively on filenames.
-
-A file can be renamed on the Android device without necessarily becoming a completely new file from a content-identity perspective.
-
-Depending on the selected verification mode, ADB-X can use combinations of:
-
-* File path
-* Filename
-* File size
-* Modification metadata
-* Content identity
-* SHA-256 hashing
-
-This allows deeper verification modes to detect situations where filename-based comparison alone would fail.
-
-> FAST mode prioritizes speed.
-> STRICT mode prioritizes content identity.
-
----
-
-## 📂 Recursive Folder Support
-
-ADB-X works recursively with directories.
-
-For example:
-
-```text
-/sdcard/DCIM/Camera
-├── IMG_001.jpg
-├── IMG_002.jpg
-└── 2026
-    ├── IMG_003.jpg
-    └── IMG_004.jpg
-```
-
-The complete directory structure can be preserved in the PC backup.
-
----
-
-# 🖥️ Requirements
-
-## Windows
-
-ADB-X requires:
-
-* Windows 10/11
-* Python 3.x
-* Android Debug Bridge (`adb`)
-* USB debugging enabled on the Android device
-* ADB authorization granted on the phone
-
-Check Python:
+Pick a mode per job from the interactive menu, set a job's default in
+`config.json` (`"verification_mode": "fast" | "normal" | "strict"`), or
+override it for a single run:
 
 ```bat
-python --version
+backup.exe --job Camera --mode fast
+backup.exe --job Camera --mode normal
+backup.exe --job Camera --mode strict
+backup.exe --run-all --mode strict
 ```
 
-Check ADB:
+With no `--mode` given, each job uses its own configured mode, falling
+back to the global `settings.verification_mode` default (`fast`).
 
-```bat
-adb version
-```
-
-Check connected devices:
-
-```bat
-adb devices
-```
-
-Expected:
-
-```text
-List of devices attached
-AEEIRO7LRCMJIZKN    device
-```
-
-If the device shows:
-
-```text
-unauthorized
-```
-
-unlock the phone and accept the USB debugging authorization dialog.
+NORMAL and STRICT modes use an optional, supplementary local hash index
+(`hash_index.sqlite3` by default) purely as a performance hint for
+rename/move detection — it is never the source of truth. If it's
+missing, deleted, or corrupted, it's rebuilt automatically and the
+backup itself stays correct either way.
 
 ---
 
-# 📱 Android Setup
+## 1. Requirements
 
-## 1. Enable Developer Options
+- **Windows 10/11**
+- **Python 3.9+** ([python.org](https://www.python.org/downloads/windows/) — check "Add python.exe to PATH" during install)
+- **Android Platform Tools** (`adb.exe`) — download from
+  https://developer.android.com/tools/releases/platform-tools and either:
+  - add the extracted folder to your Windows `PATH`, **or**
+  - put `adb.exe` (and `AdbWinApi.dll`, `AdbWinUsbApi.dll`) next to `main.py`, **or**
+  - point `adb_path` in `config.json` at the full path to `adb.exe`.
+- On the phone: **Settings → About phone → tap "Build number" 7 times** to
+  enable Developer Options, then **Settings → Developer options → USB
+  debugging → ON**. Connect via USB and accept the "Allow USB debugging?"
+  prompt (tick "Always allow from this computer" so unattended `.bat` runs
+  don't hang waiting for a tap).
 
-On most Android devices:
-
-```text
-Settings
-→ About phone
-→ MIUI/HyperOS version
-→ Tap several times
-```
-
-until Developer Options are enabled.
-
-## 2. Enable USB Debugging
-
-Go to:
-
-```text
-Settings
-→ Developer options
-→ USB debugging
-```
-
-Enable it.
-
-## 3. Connect the Phone
-
-Connect the Android device using USB.
-
-Run:
+## 2. Install
 
 ```bat
-adb devices
-```
-
-Authorize the computer on the phone if requested.
-
----
-
-# 🚀 Installation
-
-Clone the repository:
-
-```bat
-git clone <YOUR_REPOSITORY_URL>
-cd ADB-X
-```
-
-If the project provides dependencies:
-
-```bat
+cd android_backup
 pip install -r requirements.txt
 ```
 
-Verify the application:
+Copy `config.example.json` to `config.json` and edit the `jobs` list —
+each job is just a name, an Android source path, and a Windows
+destination folder:
 
-```bat
-python main.py --help
+```json
+{
+  "name": "Camera",
+  "source": "/sdcard/DCIM/Camera",
+  "destination": "F:\\Backups\\Camera"
+}
 ```
 
-You should see:
+You can also manage jobs from the command line or the interactive menu
+instead of hand-editing JSON (see below).
 
-```text
-usage: backup [-h] [--config CONFIG] [--version]
-              [--job NAME | --run-all | --list-devices | --list-jobs]
-              [--auto]
-              [--serial SERIAL]
-              [--mode {fast,normal,strict}]
-              [--delete]
-              [--verify-hash]
-              [--no-verify-hash]
-              [--retry N]
-              [--workers N]
-              [--verbose]
-              [--add-job NAME SOURCE DEST]
-              [--remove-job NAME]
-```
-
----
-
-# 🎮 Interactive Mode
-
-The easiest way to use ADB-X is the interactive interface:
+## 3. Interactive use
 
 ```bat
 python main.py
 ```
 
-The application opens the main dashboard.
+or double-click `interactive.bat`. You'll get a menu:
 
-The general navigation flow is:
+```
+Android ADB Backup
+────────────────────────────────────────
+Device: POCO M4 Pro
+Status: Connected
 
-```text
-MAIN MENU
-   │
-   ├── 📂 View Jobs
-   │      │
-   │      ├── 📷 Camera
-   │      ├── 🖼️ Albums
-   │      └── 🎙️ Recordings
-   │
-   ├── 🚀 Run All Jobs
-   ├── 📊 Backup Status
-   ├── ⚙️ Settings
-   └── 🚪 Exit
+Backup Jobs
+1. Camera
+2. Albums
+3. Recordings
+4. Add new backup job
+5. Run all jobs
+6. Manage jobs (edit/remove)
+7. Settings
+8. Exit
 ```
 
-Jobs are intentionally kept inside **View Jobs** so the main dashboard remains clean.
+Selecting a job scans both sides, shows a summary, and asks for
+confirmation before transferring:
 
----
+```
+Backup Summary
+────────────────────────────────────────
+New files:          23
+Already backed up:  1842
+Changed files:       2
+Missing files:       0
+Incomplete files:    1
+Total to transfer:  26
+Total size:         4.7 GB
 
-# 📂 Jobs
-
-A job defines:
-
-```text
-Android source
-      ↓
-PC destination
-      ↓
-Backup configuration
+Proceed? [Y/N]
 ```
 
-Example:
+During transfer you get a live progress bar per file (current file,
+bytes done, speed, ETA), followed by a final summary:
 
-```text
-Camera
-Source:
-    /sdcard/DCIM/Camera
-
-Destination:
-    F:\Backups\Camera
+```
+Backup completed
+────────────────────────────────────────
+Transferred: 26
+Skipped: 1842
+Failed: 0
+Verified: 26
+Total: 1868
 ```
 
-Another example:
+If there's nothing to do, it says so and doesn't touch anything:
 
-```text
-Recordings
-Source:
-    /sdcard/Recordings
-
-Destination:
-    F:\Backups\Recordings
+```
+Everything is already backed up.
+No new or changed files found.
 ```
 
----
+## 4. Fully automatic mode (for a one-click .bat file)
 
-# 🧰 Command-Line Usage
-
-ADB-X can also be controlled directly from the command line.
-
-## Run a specific job
+This is the mode meant for `run_all.bat` / Task Scheduler — **no
+keyboard interaction, ever**:
 
 ```bat
-python main.py --job Camera
+python main.py --run-all --auto
+python main.py --job Camera --auto
+python main.py --job "Camera" --auto --verify-hash
 ```
 
-## Run all enabled jobs
+`run_all.bat` (included) does exactly this and reports success/failure
+via its exit code:
 
 ```bat
-python main.py --run-all
+@echo off
+cd /d "%~dp0"
+python main.py --run-all --auto
+pause
 ```
 
-## List connected devices
+Exit codes (useful in Task Scheduler or your own scripts):
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success, nothing failed |
+| 1 | Completed, but at least one file failed to transfer (see log) |
+| 2 | Configuration or device error — nothing was attempted |
+| 3 | Unexpected/fatal error |
+
+In `--auto` mode, if the configured device isn't found (wrong phone
+plugged in, cable unplugged, `device_serial` mismatch), the tool exits
+with code 2 and logs why — it will **not** guess and back up the wrong
+device.
+
+## 5. Command-line reference
+
+```
+python main.py [options]
+
+  --job NAME              Run a single job by name
+  --run-all               Run every enabled job
+  --auto                  Non-interactive: no prompts (required for .bat use)
+  --serial SERIAL         Use this device serial for this run
+  --delete                Also remove PC files this tool previously wrote
+                           that are no longer present on the device
+  --verify-hash           Force SHA-256 verification for this run
+  --no-verify-hash        Disable SHA-256 verification for this run
+  --retry N                Override retry count for this run
+  --config PATH            Path to config.json (default: ./config.json)
+  --list-devices           List connected ADB devices and exit
+  --list-jobs              List configured jobs and exit
+  --add-job NAME SRC DEST  Add a job and exit
+  --remove-job NAME        Remove a job and exit
+  --verbose                Verbose console output
+  --version                Show version
+  --help                   Show this help
+```
+
+Every option also has a `--help` entry: `python main.py --help`.
+
+## 6. How incremental sync works
+
+1. **Scan the Android source** in a single `adb shell` round trip
+   (`find … -exec stat -c '%s|%Y|%n' …`), returning size + mtime for
+   every file under the configured path.
+2. **Scan the PC destination** with a plain filesystem walk (no file
+   contents are read at this stage).
+3. **Compare** and classify every remote file as:
+   - `already_backed_up` — same size on both sides → skipped
+   - `new` — not on the PC yet
+   - `changed` — size differs from the PC copy
+   - `missing` — was backed up before (tracked in the state DB) but the
+     local file is gone now (e.g. you deleted it) → re-copied
+   - `incomplete` — only a stale `.part` file exists on the PC → discarded
+     and re-copied from scratch
+4. **Transfer** each file into `<name>.<ext>.part`, verify (size always;
+   optional SHA-256 with `verify_hash: true` / `--verify-hash`), then
+   atomically rename to the final name. A file is only ever considered
+   backed up **after** this verification succeeds.
+5. A small SQLite database (`backup_state.sqlite3`) caches this history
+   per job to make future runs faster and to distinguish "new" from
+   "missing" — but it is never trusted on its own. Every run re-checks
+   the real Android and PC filesystems before doing anything.
+
+**Interrupted-transfer example** (exactly the scenario this tool is
+built to handle safely):
+
+```
+Phone: 1000 files
+PC:    600 complete files
+Transfer starts on file #601 → USB cable disconnects mid-copy
+
+Next run:
+  files 1–600   → already complete, skipped
+  file  601     → only a .part exists → discarded, re-copied
+  files 602–1000 → missing, copied
+```
+
+Nothing is ever marked "backed up" until the corresponding file
+physically exists, complete and verified, in the destination folder.
+
+## 7. Safety
+
+- Backup is one-way: Android → PC only. The app never writes to,
+  modifies, or deletes anything on the phone.
+- PC destination files are **never** deleted automatically. Passing
+  `--delete` only removes files *this job previously wrote* that have
+  since disappeared from the phone — it will never touch unrelated files
+  you've placed in the destination folder, and always logs what it
+  removed.
+- No root required.
+
+## 8. Multiple devices
 
 ```bat
 python main.py --list-devices
 ```
 
-## List configured jobs
+If more than one device is plugged in, either pass `--serial <serial>`,
+set a per-job `"device_serial"` in `config.json`, or set the global
+default `device_serial` under Settings in the interactive menu. In
+`--auto` mode, an ambiguous or mismatched device causes a clean exit
+(code 2) rather than guessing.
+
+## 9. Filenames with spaces / Unicode / Persian / parentheses / brackets
+
+Handled throughout: the Android-side listing command single-quotes paths
+for the device shell, transfers are invoked with proper argument lists
+(never a naive shell string on the Windows side), and all tests include
+Unicode/space/parenthesis cases (see `tests/test_scanner.py`).
+
+## 10. Testing
+
+Unit tests cover the comparator (the core sync-decision logic) and the
+scanner/parsing logic, including the exact "USB unplugged mid-transfer"
+scenario from the spec. No device or `adb` install is required to run
+them:
 
 ```bat
-python main.py --list-jobs
+pip install -r requirements.txt
+python -m unittest discover -s tests -v
 ```
 
----
-
-# ⚡ Verification Modes
-
-The verification mode can be overridden for a single run.
-
-### FAST
+To test against a real device without touching your actual backups,
+create a throwaway job pointed at a small test folder first, e.g.:
 
 ```bat
-python main.py --job Camera --mode fast
+python main.py --add-job Test /sdcard/Download/test_folder .\test_backup_out
+python main.py --job Test --auto --verbose
 ```
 
-### NORMAL
+Then unplug the cable mid-transfer on a larger folder once and re-run
+the same job to confirm it resumes correctly instead of re-copying
+everything.
 
-```bat
-python main.py --job Camera --mode normal
+## 11. Project layout
+
+```
+android_backup/
+  main.py                  CLI entry point (interactive + --auto)
+  config.example.json      Copy to config.json and edit
+  requirements.txt
+  run_all.bat               One-click: run every enabled job
+  run_job_example.bat       One-click: run a single named job
+  interactive.bat            One-click: open the interactive menu
+  src/
+    adb_manager.py          All adb.exe subprocess calls
+    device_manager.py       Device selection/verification
+    scanner.py               Source (Android) + destination (PC) listing
+    comparator.py             Classifies files: new/changed/missing/incomplete
+    transfer_engine.py        .part transfer, progress, verify, retry, rename
+    verifier.py                Size + streamed SHA-256 verification
+    backup_job.py              Orchestrates one job: scan→compare→transfer
+    config_manager.py          JSON config load/save/job CRUD
+    state_manager.py            Supplementary SQLite history cache
+    logger.py                   Rotating file log + console
+    ui.py                        Rich-based interactive terminal UI
+    models.py                    Shared dataclasses/enums
+  tests/
+    test_comparator.py
+    test_scanner.py
+  logs/
+    backup.log                Rotating log (created on first run)
 ```
 
-### STRICT
-
-```bat
-python main.py --job Camera --mode strict
-```
-
-The command-line mode overrides the configured mode for that run.
-
----
-
-# 🤖 Automatic Mode
-
-ADB-X provides a non-interactive mode designed for:
-
-* `.bat` scripts
-* Windows Task Scheduler
-* Scheduled backups
-* Automated workflows
-
-Use:
-
-```bat
-python main.py --job Camera --auto
-```
-
-`--auto` means:
-
-* No Y/N confirmation
-* No interactive job selection
-* No interactive prompts
-* Safe for automation
-
----
-
-# 🔥 Automated Multi-Job Backup
-
-For example, to automatically back up:
-
-```text
-Camera
-Albums
-Recordings
-```
-
-in sequence:
-
-```bat
-@echo off
-
-cd /d "%~dp0"
-
-echo.
-echo ==========================================
-echo              ADB-X AUTO BACKUP
-echo ==========================================
-echo.
-
-python main.py --job Camera --mode fast --auto
-
-if errorlevel 1 (
-    echo Camera backup failed.
-    exit /b %ERRORLEVEL%
-)
-
-python main.py --job Albums --mode fast --auto
-
-if errorlevel 1 (
-    echo Albums backup failed.
-    exit /b %ERRORLEVEL%
-)
-
-python main.py --job Recordings --mode fast --auto
-
-if errorlevel 1 (
-    echo Recordings backup failed.
-    exit /b %ERRORLEVEL%
-)
-
-echo.
-echo ==========================================
-echo        ALL BACKUPS COMPLETED
-echo ==========================================
-echo.
-
-pause
-```
-
-This executes the jobs sequentially:
-
-```text
-Camera
-   ↓
-Albums
-   ↓
-Recordings
-```
-
-No Y/N confirmation is required because `--auto` is enabled.
-
----
-
-# 🧪 Hash Verification
-
-Force SHA-256 verification:
-
-```bat
-python main.py --job Camera --verify-hash
-```
-
-Disable SHA-256 verification:
-
-```bat
-python main.py --job Camera --no-verify-hash
-```
-
-These options override the normal verification behavior for that run.
-
----
-
-# 🔄 Retry Control
-
-Retry behavior can be overridden:
-
-```bat
-python main.py --job Camera --retry 3
-```
-
-This is useful when working with unstable USB connections or devices.
-
----
-
-# 👥 Parallel Workers
-
-ADB-X supports multiple transfer workers.
-
-Override the configured value:
-
-```bat
-python main.py --job Camera --workers 4
-```
-
-Workers are an internal transfer-performance mechanism.
-
-They are intentionally not required to be displayed in the user-facing UI.
-
----
-
-# 📊 Live Backup Interface
-
-During a backup, ADB-X provides a live terminal interface.
-
-The important information is displayed in a compact format:
-
-```text
-📦 BACKUP [30/14000] IMG_20260822_080531_very_long_name_...
-⚡ 92.4 MB/s │ 📊 4.82/25.3 GB │ ⏱ ETA 00:03:48
-```
-
-### `[30/14000]`
-
-Means:
-
-```text
-30     = current file
-14000  = total files
-```
-
-The interface does not intentionally spam the terminal with one permanent line per file.
-
-The current file is updated inside the live interface.
-
----
-
-# ⚡ Transfer Speed
-
-ADB-X reports the actual transfer rate in:
-
-```text
-MB/s
-```
-
-Example:
-
-```text
-⚡ 92.4 MB/s
-```
-
-The value is calculated from transferred data and elapsed time rather than being a static placeholder.
-
----
-
-# 📄 Long Filenames
-
-Long filenames are automatically shortened for display.
-
-Example:
-
-```text
-📦 BACKUP [30/14000] IMG_20260822_080531_very_long_filename_...
-```
-
-Short filenames remain complete:
-
-```text
-📦 BACKUP [31/14000] IMG_20260822_080532.mp4
-```
-
-The displayed `...` does **not** rename or modify the actual file.
-
-The real filename remains unchanged on disk.
-
----
-
-# 🔌 Device Reconnection
-
-ADB-X is designed to handle temporary ADB disconnections.
-
-If the cable is disconnected during a backup, the interface can report:
-
-```text
-🔌 ADB CONNECTION LOST
-⏳ Waiting for device to reconnect...
-```
-
-After the device becomes available:
-
-```text
-🟢 ADB CONNECTION RESTORED
-🔄 Resuming backup...
-```
-
-This prevents a temporary USB interruption from silently looking like a frozen application.
-
----
-
-# 🛡️ Safe Incremental Behavior
-
-ADB-X is designed around a simple principle:
-
-```text
-Android
-   ↓
-Compare
-   ↓
-Existing PC backup?
-   ├── YES → Skip
-   └── NO  → Transfer
-```
-
-The goal is to avoid retransferring files that have already been backed up.
-
-For deeper verification, additional file identity information can be used.
-
----
-
-# ⚠️ Important: Do Not Modify Backup Files Manually
-
-For the most reliable incremental behavior:
-
-**Do not manually rename, move or modify files inside the backup destination unless you understand how the selected verification mode identifies them.**
-
-The backup system maintains its own understanding of previously transferred data.
-
-If files are manually changed outside ADB-X, the program may correctly interpret them as missing, changed, or requiring verification.
-
----
-
-# 🗑️ Delete Mode
-
-ADB-X also supports:
-
-```bat
---delete
-```
-
-Example:
-
-```bat
-python main.py --job Camera --delete
-```
-
-This enables removal of PC files previously written by that job when they are no longer present on the Android source.
-
-### ⚠️ Use carefully
-
-Deletion is fundamentally different from normal incremental backup.
-
-Normal backup:
-
-```text
-Phone → PC
-```
-
-Delete mode can additionally remove files from:
-
-```text
-PC
-```
-
-when they are determined to no longer exist on the device.
-
----
-
-# ➕ Adding Jobs
-
-A job can be added from the command line:
-
-```bat
-python main.py --add-job Camera /sdcard/DCIM/Camera "F:\Backups\Camera"
-```
-
-Example:
-
-```bat
-python main.py --add-job Recordings /sdcard/Recordings "F:\Backups\Recordings"
-```
-
----
-
-# ➖ Removing Jobs
-
-Remove a configured job:
-
-```bat
-python main.py --remove-job Camera
-```
-
----
-
-# 📋 Configuration
-
-The default configuration file is:
-
-```text
-config.json
-```
-
-ADB-X can use a custom configuration file:
-
-```bat
-python main.py --config my-config.json
-```
-
-This is useful when maintaining multiple backup profiles.
-
----
-
-# 🧩 Custom Configuration
-
-The project is designed around configurable jobs rather than hard-coded
-backup locations.
-
-A typical job contains information conceptually similar to:
-
-```text
-Job
-├── Name
-├── Android Source
-├── PC Destination
-├── Enabled
-└── Verification / Backup Settings
-```
-
-Use the application's job management interface whenever possible rather
-than manually editing configuration values without understanding their
-meaning.
-
----
-
-# 📝 Logging
-
-ADB-X maintains logs for backup operations.
-
-Logs are useful for investigating:
-
-* Failed transfers
-* ADB disconnects
-* Verification failures
-* Retry attempts
-* Unexpected device behavior
-* Interrupted backups
-
-When reporting a problem, include the relevant log information rather
-than only the final error message.
-
----
-
-# 🔍 Troubleshooting
-
-## Device not detected
-
-Run:
-
-```bat
-adb devices
-```
-
-If nothing appears:
-
-1. Check the USB cable.
-2. Check USB connection mode.
-3. Make sure USB Debugging is enabled.
-4. Unlock the Android device.
-5. Accept the RSA authorization prompt.
-6. Restart ADB if necessary.
-
-Try:
-
-```bat
-adb kill-server
-adb start-server
-adb devices
-```
-
----
-
-## Device shows `unauthorized`
-
-Unlock the phone and accept:
-
-```text
-Allow USB debugging?
-```
-
-Then run:
-
-```bat
-adb devices
-```
-
-again.
-
----
-
-## Backup appears slow
-
-Large directories containing thousands of files can require significant
-time to scan.
-
-This is expected because the application must inspect enough information
-to determine what actually requires backup.
-
-Performance depends on:
-
-* Number of files
-* USB connection
-* Android filesystem performance
-* ADB performance
-* Storage speed
-* Selected verification mode
-* File sizes
-
-FAST mode is intended for frequent backups where minimizing verification
-overhead is important.
-
-STRICT mode performs deeper content verification and can therefore take
-significantly longer.
-
----
-
-## Why is scanning slower with many small files?
-
-A directory containing:
-
-```text
-14,000 files
-```
-
-can be slower to inspect than a directory containing:
-
-```text
-100 large files
-```
-
-even if the total storage size is similar.
-
-The bottleneck is often file metadata enumeration and ADB filesystem
-operations rather than raw USB transfer speed.
-
----
-
-# 🏗️ Architecture
-
-Conceptually, ADB-X is divided into several responsibilities:
-
-```text
-┌─────────────────────────────┐
-│       Interactive UI        │
-├─────────────────────────────┤
-│        Job Manager          │
-├─────────────────────────────┤
-│   Incremental Detection     │
-├─────────────────────────────┤
-│ Verification / Hash Engine  │
-├─────────────────────────────┤
-│      Transfer Engine        │
-├─────────────────────────────┤
-│          ADB Layer          │
-└─────────────────────────────┘
-              │
-              ▼
-        Android Device
-```
-
-This separation allows the terminal interface to evolve without
-unnecessarily changing the underlying backup engine.
-
----
-
-# 🎯 Design Philosophy
-
-ADB-X follows several principles:
-
-### 1. Don't copy what already exists
-
-Incremental backup should avoid unnecessary transfers.
-
-### 2. Speed when possible
-
-FAST mode should minimize unnecessary deep verification.
-
-### 3. Identity when necessary
-
-Deeper verification modes can use stronger file identity mechanisms.
-
-### 4. Automation
-
-A backup tool should work both interactively and unattended.
-
-### 5. Visibility
-
-The user should always know:
-
-```text
-What is happening?
-Which file is being processed?
-How much is done?
-How fast is it?
-How much remains?
-```
-
-### 6. Clean UI
-
-A professional backup tool should not flood the terminal with thousands
-of repetitive lines.
-
----
-
-# 🗺️ Roadmap
-
-Potential future improvements:
-
-* [ ] Automatic scheduled backup profiles
-* [ ] Backup history dashboard
-* [ ] More advanced transfer statistics
-* [ ] Resume interrupted individual files
-* [ ] Backup snapshots
-* [ ] Storage health information
-* [ ] Multiple connected Android devices
-* [ ] Profile-based backup configurations
-* [ ] Richer verification reports
-* [ ] Backup integrity auditing
-* [ ] Optional encrypted backup archives
-
----
-
-# ⚠️ Disclaimer
-
-ADB-X is a backup utility built around Android Debug Bridge.
-
-Always maintain an independent backup of important data.
-
-No backup system should be considered the only copy of irreplaceable
-files.
-
-Before using destructive options such as:
-
-```text
---delete
-```
-
-verify your source and destination paths carefully.
-
----
-
-# 📜 License
-
-Choose and add an appropriate open-source license for this project.
-
-Recommended options include:
-
-* MIT
-* Apache-2.0
-* GPL-3.0
-
-Example:
-
-```text
-MIT License
-```
-
----
-
-# ⚡ ADB-X
-
-**The Android ADB Specialist.**
-
-```text
-CONNECT.
-SCAN.
-VERIFY.
-BACK UP.
-```
-
-> **Master the connectionf. Control the data.**
+## 12. Troubleshooting
+
+- **"Could not find 'adb'"** → install platform-tools and add it to
+  `PATH`, or set `adb_path` in `config.json`.
+- **"No authorized Android device found"** → check the cable, that USB
+  debugging is on, and accept the on-phone authorization prompt.
+- **Device found but files not appearing** → double-check the `source`
+  path exists on the phone exactly as typed (case-sensitive); use
+  `adb shell ls /sdcard/...` to confirm.
+- **Hash verification says "device has no sha256sum binary"** → some
+  minimal ROMs lack it; the tool automatically falls back to size-only
+  verification and logs a one-time warning. Size verification alone is
+  sufficient to catch truncated/interrupted transfers.

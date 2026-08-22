@@ -1,0 +1,68 @@
+{
+  "settings": {
+    "adb_path": "adb",
+    "device_serial": null,
+    "retry_count": 3,
+    "retry_backoff_seconds": 2.0,
+    "verify_hash": false,
+    "hash_algorithm": "sha256",
+    "mtime_tolerance_seconds": 3,
+    "workers": 4,
+    "log_dir": "logs",
+    "state_db": "backup_state.sqlite3",
+    "verification_mode": "fast",
+    "hash_chunk_size": 4194304,
+    "hash_index_db": "hash_index.sqlite3"
+  },
+  "jobs": [
+    {
+      "name": "Camera",
+      "source": "/sdcard/DCIM/Camera",
+      "destination": "F:\\Backups\\Camera",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": null
+    },
+    {
+      "name": "Albums",
+      "source": "/sdcard/DCIM/Albums",
+      "destination": "F:\\Backups\\Albums",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": null
+    },
+    {
+      "name": "Recordings",
+      "source": "/sdcard/Recordings",
+      "destination": "F:\\Backups\\Recordings",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": "normal"
+    },
+    {
+      "name": "Music",
+      "source": "/sdcard/Music",
+      "destination": "F:\\Backups\\Music",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": null
+    },
+    {
+      "name": "Download",
+      "source": "/sdcard/Download",
+      "destination": "F:\\Backups\\Download",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": null
+    },
+    {
+      "name": "Documents",
+      "source": "/sdcard/Documents",
+      "destination": "F:\\Backups\\Documents",
+      "device_serial": null,
+      "enabled": true,
+      "verification_mode": "strict"
+    }
+  ]
+}
+

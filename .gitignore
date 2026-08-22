@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+config.json
+backup_state.sqlite3
+logs/
